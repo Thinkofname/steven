@@ -15,9 +15,12 @@
 mod server_list;
 pub use self::server_list::*;
 mod login;
+pub mod setting_menu;
+
 pub use self::login::*;
 pub mod connecting;
 pub mod edit_server;
+pub use self::setting_menu::{SettingMenu, VideoSettingsMenu, AudioSettingsMenu};
 
 use render;
 use ui;
@@ -81,6 +84,10 @@ impl ScreenSystem {
     pub fn replace_screen(&mut self, screen: Box<Screen>) {
         self.pop_screen();
         self.add_screen(screen);
+    }
+
+    pub fn has_open_screen(&self) -> bool {
+        !self.screens.is_empty()
     }
 
     pub fn tick(&mut self,
