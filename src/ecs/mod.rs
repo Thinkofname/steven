@@ -520,7 +520,7 @@ impl ComponentMem {
         let data = self.data[idx].as_ref().unwrap();
         let start = rem * self.component_size;
         unsafe {
-            &*(data.0.as_ptr().offset(start as isize) as *mut T)
+            &*(data.0.as_ptr().offset(start as isize) as *const T)
         }
     }
 
