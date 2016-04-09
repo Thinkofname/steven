@@ -15,12 +15,12 @@
 mod server_list;
 pub use self::server_list::*;
 mod login;
-pub mod setting_menu;
+pub mod settings_menu;
 
 pub use self::login::*;
 pub mod connecting;
 pub mod edit_server;
-pub use self::setting_menu::{SettingMenu, VideoSettingsMenu, AudioSettingsMenu};
+pub use self::settings_menu::{SettingsMenu, VideoSettingsMenu, AudioSettingsMenu};
 
 use render;
 use ui;
@@ -45,6 +45,10 @@ pub trait Screen {
 
     // Events
     fn on_scroll(&mut self, x: f64, y: f64) {
+    }
+
+    fn is_closable(&self) -> bool {
+        false
     }
 }
 
@@ -86,8 +90,12 @@ impl ScreenSystem {
         self.add_screen(screen);
     }
 
-    pub fn has_open_screen(&self) -> bool {
-        !self.screens.is_empty()
+    pub fn is_current_closable(&self) -> bool {
+        if let Some(last) = self.screens.last() {
+            last.screen.is_closable()
+        } else {
+            true
+        }
     }
 
     pub fn tick(&mut self,

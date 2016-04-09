@@ -46,44 +46,52 @@ pub struct UIElement {
     // TODO: Add background of some sort
 }
 
-pub struct SettingMenu {
+pub struct SettingsMenu {
     console: Arc<Mutex<console::Console>>,
-    elements: Option<UIElement>
+    elements: Option<UIElement>,
+    show_disconnect_button: bool
 }
 
-impl SettingMenu {
-    pub fn new(console: Arc<Mutex<console::Console>>) -> SettingMenu {
-        SettingMenu {
+impl SettingsMenu {
+    pub fn new(console: Arc<Mutex<console::Console>>, show_disconnect_button: bool) -> SettingsMenu {
+        SettingsMenu {
             console: console,
-            elements: None
+            elements: None,
+            show_disconnect_button: show_disconnect_button
         }
     }
 }
 
-impl super::Screen for SettingMenu {
+impl super::Screen for SettingsMenu {
     fn on_active(&mut self, renderer: &mut render::Renderer, ui_container: &mut ui::Container) {
         let mut elements = ui::Collection::new();
 
         // From top and down
         let (btn_audio_settings, txt_audio_settings) = new_submenu_button("Audio settings...", renderer, ui_container, -160.0, -50.0);
         super::button_action(ui_container, btn_audio_settings.clone(), Some(txt_audio_settings.clone()), move | game, _ | {
-            game.screen_sys.replace_screen(Box::new(AudioSettingsMenu::new(game.console.clone())));
+            game.screen_sys.add_screen(Box::new(AudioSettingsMenu::new(game.console.clone())));
         });
         elements.add(btn_audio_settings);
         elements.add(txt_audio_settings);
 
         let (btn_video_settings, txt_video_settings) = new_submenu_button("Video settings...", renderer, ui_container, 160.0, -50.0);
         super::button_action(ui_container, btn_video_settings.clone(), Some(txt_video_settings.clone()), move | game, _ | {
-            game.screen_sys.replace_screen(Box::new(VideoSettingsMenu::new(game.console.clone())));
+            game.screen_sys.add_screen(Box::new(VideoSettingsMenu::new(game.console.clone())));
         });
         elements.add(btn_video_settings);
         elements.add(txt_video_settings);
 
         let (btn_controls_settings, txt_controls_settings) = new_submenu_button("Controls...", renderer, ui_container, 160.0, 0.0);
+        super::button_action(ui_container, btn_controls_settings.clone(), Some(txt_controls_settings.clone()), move | game, _ | {
+            // TODO: Implement this...
+        });
         elements.add(btn_controls_settings);
         elements.add(txt_controls_settings);
 
         let (btn_locale_settings, txt_locale_settings) = new_submenu_button("Language...", renderer, ui_container, -160.0, 0.0);
+        super::button_action(ui_container, btn_locale_settings.clone(), Some(txt_locale_settings.clone()), move | game, _ | {
+            // TODO: Implement this...
+        });
         elements.add(btn_locale_settings);
         elements.add(txt_locale_settings);
 
@@ -96,13 +104,15 @@ impl super::Screen for SettingMenu {
         elements.add(btn_back_to_game);
         elements.add(txt_back_to_game);
 
-        let (mut btn_exit_game, mut txt_exit_game) = new_centered_button("Back to main menu", renderer, ui_container, 100.0, ui::VAttach::Bottom);
-        super::button_action(ui_container, btn_exit_game.clone(), Some(txt_exit_game.clone()), move | game, _ | {
-            game.server.disconnect();
-            game.screen_sys.replace_screen(Box::new(super::ServerList::new(None)));
-        });
-        elements.add(btn_exit_game);
-        elements.add(txt_exit_game);
+        if self.show_disconnect_button {
+            let (mut btn_exit_game, mut txt_exit_game) = new_centered_button("Disconnect", renderer, ui_container, 100.0, ui::VAttach::Bottom);
+            super::button_action(ui_container, btn_exit_game.clone(), Some(txt_exit_game.clone()), move | game, _ | {
+                game.server.disconnect();
+                game.screen_sys.replace_screen(Box::new(super::ServerList::new(None)));
+            });
+            elements.add(btn_exit_game);
+            elements.add(txt_exit_game);
+        }
 
         self.elements = Some(UIElement {
             elements: elements
@@ -125,6 +135,10 @@ impl super::Screen for SettingMenu {
     // Events
     fn on_scroll(&mut self, x: f64, y: f64) {
 
+    }
+
+    fn is_closable(&self) -> bool {
+        true
     }
 }
 
@@ -182,7 +196,7 @@ impl super::Screen for VideoSettingsMenu {
 
         let (mut btn_done, mut txt_done) = new_centered_button("Done", renderer, ui_container, 50.0, ui::VAttach::Bottom);
         super::button_action(ui_container, btn_done.clone(), Some(txt_done.clone()), move | game, _ | {
-            game.screen_sys.replace_screen(Box::new(SettingMenu::new(game.console.clone())));
+            game.screen_sys.pop_screen();
         });
         elements.add(btn_done);
         elements.add(txt_done);
@@ -207,6 +221,10 @@ impl super::Screen for VideoSettingsMenu {
     // Events
     fn on_scroll(&mut self, x: f64, y: f64) {
 
+    }
+
+    fn is_closable(&self) -> bool {
+        true
     }
 }
 
@@ -239,7 +257,7 @@ impl super::Screen for AudioSettingsMenu {
 
         let (mut btn_done, mut txt_done) = new_centered_button("Done", renderer, ui_container, 50.0, ui::VAttach::Bottom);
         super::button_action(ui_container, btn_done.clone(), Some(txt_done.clone()), move | game, _ | {
-            game.screen_sys.replace_screen(Box::new(SettingMenu::new(game.console.clone())));
+            game.screen_sys.pop_screen();
         });
         elements.add(btn_done);
         elements.add(txt_done);
@@ -265,5 +283,9 @@ impl super::Screen for AudioSettingsMenu {
     // Events
     fn on_scroll(&mut self, x: f64, y: f64) {
 
+    }
+
+    fn is_closable(&self) -> bool {
+        true
     }
 }

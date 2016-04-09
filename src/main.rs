@@ -299,7 +299,7 @@ fn handle_window_event(window: &sdl2::video::Window,
         Event::MouseButtonUp{mouse_btn: Mouse::Left, x, y, ..} => {
             let (width, height) = window.size();
 
-            if game.server.is_connected() && !game.focused && !game.screen_sys.has_open_screen() {
+            if game.server.is_connected() && !game.focused && !game.screen_sys.is_current_closable() {
                 game.focused = true;
                 if !mouse.relative_mouse_mode() {
                     mouse.set_relative_mouse_mode(true);
@@ -320,8 +320,8 @@ fn handle_window_event(window: &sdl2::video::Window,
             if game.focused {
                 mouse.set_relative_mouse_mode(false);
                 game.focused = false;
-                game.screen_sys.replace_screen(Box::new(screen::SettingMenu::new(game.console.clone())));
-            } else if game.screen_sys.has_open_screen() {
+                game.screen_sys.replace_screen(Box::new(screen::SettingsMenu::new(game.console.clone(), true)));
+            } else if game.screen_sys.is_current_closable() {
                 mouse.set_relative_mouse_mode(true);
                 game.focused = true;
                 game.screen_sys.pop_screen();
