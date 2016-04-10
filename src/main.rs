@@ -199,8 +199,6 @@ fn main() {
     let renderer = render::Renderer::new(resource_manager.clone());
     let mut ui_container = ui::Container::new();
 
-    let mut last_frame = time::now();
-    let frame_time = (time::Duration::seconds(1).num_nanoseconds().unwrap() as f64) / 60.0;
 
     let mut screen_sys = screen::ScreenSystem::new();
     screen_sys.add_screen(Box::new(screen::Login::new(con.clone())));
@@ -220,39 +218,61 @@ fn main() {
     game.renderer.camera.pos = cgmath::Point3::new(0.5, 13.2, 0.5);
 
     let mut events = sdl.event_pump().unwrap();
+    
+    let frame_rate = *game.console.lock().unwrap().get(settings::R_MAX_FPS);
+    let mut last_frame = time::now();
+
+    let frame_time = (time::Duration::seconds(1).num_nanoseconds().unwrap() as f64) / frame_rate as f64;
+    
+    let mut diff = time::Duration::nanoseconds(0);
+    
     while !game.should_close {
-        let version = {
-            let mut res = game.resource_manager.write().unwrap();
-            res.tick();
-            res.version()
-        };
-
-        let now = time::now();
-        let diff = now - last_frame;
-        last_frame = now;
         let delta = (diff.num_nanoseconds().unwrap() as f64) / frame_time;
-        let (width, height) = window.drawable_size();
+        
+        diff = time::Duration::span(||{
+            let version = {
+                let mut res = game.resource_manager.write().unwrap();
+                res.tick();
+                res.version()
+            };
 
-        game.tick(delta);
-        game.server.tick(&mut game.renderer, delta);
+            let (width, height) = window.drawable_size();
 
-        game.renderer.update_camera(width, height);
-        game.server.world.compute_render_list(&mut game.renderer);
-        game.chunk_builder.tick(&mut game.server.world, &mut game.renderer, version);
+            game.tick(delta);
+            game.server.tick(&mut game.renderer, delta);
 
-        game.screen_sys.tick(delta, &mut game.renderer, &mut ui_container);
-        game.console
-            .lock()
-            .unwrap()
-            .tick(&mut ui_container, &mut game.renderer, delta, width as f64);
-        ui_container.tick(&mut game.renderer, delta, width as f64, height as f64);
-        game.renderer.tick(&mut game.server.world, delta, width, height);
+            game.renderer.update_camera(width, height);
+            game.server.world.compute_render_list(&mut game.renderer);
+            game.chunk_builder.tick(&mut game.server.world, &mut game.renderer, version);
 
-        window.gl_swap_window();
+            game.screen_sys.tick(delta, &mut game.renderer, &mut ui_container);
+            game.console
+                .lock()
+                .unwrap()
+                .tick(&mut ui_container, &mut game.renderer, delta, width as f64);
+            ui_container.tick(&mut game.renderer, delta, width as f64, height as f64);
+            game.renderer.tick(&mut game.server.world, delta, width, height);
 
-        for event in events.poll_iter() {
-            handle_window_event(&window, &mut game, &mut ui_container, event)
+            window.gl_swap_window();
+
+            for event in events.poll_iter() {
+                handle_window_event(&window, &mut game, &mut ui_container, event)
+            }
+        });
+        
+        //frame rate limiter
+        if frame_rate != 0{
+            let frame_length = (1000.0 as f64) / (frame_rate as f64);
+            let render_time = diff.num_seconds() as f64 * 1000.0 as f64 + (diff.num_milliseconds() as f64);
+            let mut diff = frame_length - render_time;
+            
+            if diff < 0.0{
+                diff = 0.0;
+            }
+            
+            ::std::thread::sleep(::std::time::Duration::from_millis((diff as f32) as u64));
         }
+        
     }
 }
 
