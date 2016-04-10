@@ -151,14 +151,15 @@ impl Game {
 
 fn main() {
     let con = Arc::new(Mutex::new(console::Console::new()));
-    {
+    let mut vsync = {
         let mut con = con.lock().unwrap();
         con.register(CL_BRAND);
         auth::register_vars(&mut con);
         settings::register_vars(&mut con);
         con.load_config();
         con.save_config();
-    }
+        con.get(settings::R_VSYNC).clone()
+    };
 
     let proxy = console::ConsoleProxy::new(con.clone());
 
@@ -177,7 +178,7 @@ fn main() {
     let sdl = sdl2::init().unwrap();
     let sdl_video = sdl.video().unwrap();
 
-    sdl_video.gl_set_swap_interval(1);
+    sdl_video.gl_set_swap_interval(if vsync { 1 } else { 0 });
 
     let window = sdl2::video::WindowBuilder::new(&sdl_video, "Steven", 854, 480)
                             .opengl()
@@ -233,6 +234,16 @@ fn main() {
         let delta = (diff.num_nanoseconds().unwrap() as f64) / frame_time;
         let (width, height) = window.drawable_size();
 
+        let fps_cap = {
+            let console = game.console.lock().unwrap();
+            let vsync_changed = console.get(settings::R_VSYNC).clone();
+            if vsync != vsync_changed {
+                vsync = vsync_changed;
+                sdl_video.gl_set_swap_interval(if vsync { 1 } else { 0 });
+            }
+            console.get(settings::R_MAX_FPS).clone()
+        };
+
         game.tick(delta);
         game.server.tick(&mut game.renderer, delta);
 
@@ -248,6 +259,14 @@ fn main() {
         ui_container.tick(&mut game.renderer, delta, width as f64, height as f64);
         game.renderer.tick(&mut game.server.world, delta, width, height);
 
+
+        if fps_cap > 0 && !vsync { // Don't cap framerate if vsync is enabled, let the driver do its magic... (or not... nvidia...)
+            let frame_time = time::now() - now;
+            let sleep_interval = time::Duration::milliseconds(1000 / fps_cap);
+            if frame_time < sleep_interval {
+                thread::sleep_ms((sleep_interval - frame_time).num_milliseconds() as u32);
+            }
+        }
         window.gl_swap_window();
 
         for event in events.poll_iter() {
