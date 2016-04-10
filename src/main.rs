@@ -158,7 +158,7 @@ fn main() {
         settings::register_vars(&mut con);
         con.load_config();
         con.save_config();
-        con.get(settings::R_VSYNC).clone()
+        *con.get(settings::R_VSYNC)
     };
 
     let proxy = console::ConsoleProxy::new(con.clone());
@@ -177,9 +177,6 @@ fn main() {
 
     let sdl = sdl2::init().unwrap();
     let sdl_video = sdl.video().unwrap();
-
-    sdl_video.gl_set_swap_interval(if vsync { 1 } else { 0 });
-
     let window = sdl2::video::WindowBuilder::new(&sdl_video, "Steven", 854, 480)
                             .opengl()
                             .resizable()
@@ -196,6 +193,9 @@ fn main() {
     window.gl_make_current(&gl_context).expect("Could not set current context.");
 
     gl::init(&sdl_video);
+
+    sdl_video.gl_set_swap_interval(if vsync { 1 } else { 0 });
+
 
     let renderer = render::Renderer::new(resource_manager.clone());
     let mut ui_container = ui::Container::new();
@@ -236,12 +236,12 @@ fn main() {
 
         let fps_cap = {
             let console = game.console.lock().unwrap();
-            let vsync_changed = console.get(settings::R_VSYNC).clone();
+            let vsync_changed = *console.get(settings::R_VSYNC);
             if vsync != vsync_changed {
                 vsync = vsync_changed;
                 sdl_video.gl_set_swap_interval(if vsync { 1 } else { 0 });
             }
-            console.get(settings::R_MAX_FPS).clone()
+            *console.get(settings::R_MAX_FPS)
         };
 
         game.tick(delta);
@@ -260,7 +260,7 @@ fn main() {
         game.renderer.tick(&mut game.server.world, delta, width, height);
 
 
-        if fps_cap > 0 && !vsync { // Don't cap framerate if vsync is enabled, let the driver do its magic... (or not... nvidia...)
+        if fps_cap > 0 && !vsync {
             let frame_time = time::now() - now;
             let sleep_interval = time::Duration::milliseconds(1000 / fps_cap);
             if frame_time < sleep_interval {
