@@ -44,7 +44,7 @@ pub struct Manager {
     version: usize,
 
     vanilla_chan: Option<mpsc::Receiver<bool>>,
-    vanilla_assets_chan: Option<mpsc::Receiver<bool>>,
+    vanilla_assets_chan: Option<mpsc::Receiver<i32>>,
     vanilla_progress: Arc<Mutex<Progress>>,
 }
 
@@ -135,15 +135,17 @@ impl Manager {
             self.vanilla_chan = None;
             self.load_vanilla();
         }
-        let mut done = false;
+        let mut mode = -1;
         if let Some(ref recv) = self.vanilla_assets_chan {
-            if let Ok(_) = recv.try_recv() {
-                done = true;
+            if let Ok(m) = recv.try_recv() {
+                mode = m;
             }
         }
-        if done {
-            self.vanilla_assets_chan = None;
+        if mode == 0 {
             self.load_assets();
+        } else if mode == 1 {
+            self.version += 1;
+            self.vanilla_assets_chan = None;
         }
 
         const UI_HEIGHT: f64 = 32.0;
@@ -279,11 +281,10 @@ impl Manager {
         let location = path::Path::new(&loc).to_owned();
         let progress_info = self.vanilla_progress.clone();
         let (send, recv) = mpsc::channel();
+            self.vanilla_assets_chan = Some(recv);
         if fs::metadata(&location).is_ok(){
             self.load_assets();
-        } else {
-            self.vanilla_assets_chan = Some(recv);
-        }
+        } 
         thread::spawn(move || {
             let client = hyper::Client::new();
             if fs::metadata(&location).is_err(){
@@ -305,7 +306,7 @@ impl Manager {
                     io::copy(&mut progress, &mut file).unwrap();
                 }
                 fs::rename(format!("index-{}.tmp", ASSET_VERSION), &location).unwrap();
-                send.send(true).unwrap();
+                send.send(0).unwrap();
             }
             let file = fs::File::open(&location).unwrap();
             let index: serde_json::Value = serde_json::from_reader(&file).unwrap();
@@ -339,6 +340,7 @@ impl Manager {
                 }
                 Self::add_task_progress(&progress_info, "Downloading Assets", "./objects", 1);
             }
+            send.send(1).unwrap();
         });
     }
 

@@ -4,7 +4,7 @@ version = "0.0.1"
 authors = [ "Thinkofdeath <thinkofdeath@spigotmc.org>" ]
 
 [dependencies]
-sdl2 = "0.16.1"
+sdl2 = "0.18"
 byteorder = "0.5.0"
 hyper = "0.8.0"
 serde = "0.7.0"
@@ -20,6 +20,7 @@ cgmath = "0.7.0"
 lazy_static = "0.1.15"
 collision = {git = "https://github.com/csherratt/collision-rs", rev = "f80825e"}
 openssl = "0.7.8"
+sdl2_mixer = "0.17.0"
 # clippy = "*"
 
 [dependencies.steven_gl]

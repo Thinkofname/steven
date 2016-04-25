@@ -17,6 +17,7 @@
 #![feature(rc_would_unwrap)]
 
 extern crate sdl2;
+extern crate sdl2_mixer;
 extern crate zip;
 extern crate image;
 extern crate time;
@@ -59,6 +60,7 @@ pub mod chunk_builder;
 pub mod auth;
 pub mod model;
 pub mod entity;
+pub mod sound;
 
 use std::sync::{Arc, RwLock, Mutex};
 use std::rc::Rc;
@@ -81,6 +83,7 @@ pub struct Game {
     renderer: render::Renderer,
     screen_sys: screen::ScreenSystem,
     resource_manager: Arc<RwLock<resources::Manager>>,
+    sound_manager: sound::Manager,
     console: Arc<Mutex<console::Console>>,
     vars: Rc<console::Vars>,
     should_close: bool,
@@ -184,6 +187,10 @@ fn main() {
     let resource_manager = Arc::new(RwLock::new(res));
 
     let sdl = sdl2::init().unwrap();
+    let _audio = sdl.audio().unwrap();
+    sdl2_mixer::init(sdl2_mixer::INIT_OGG).unwrap();
+    sdl2_mixer::open_audio(22050, sdl2_mixer::DEFAULT_FORMAT, 2, 4096).unwrap();
+    sdl2_mixer::allocate_channels(32);
     let sdl_video = sdl.video().unwrap();
     let window = sdl2::video::WindowBuilder::new(&sdl_video, "Steven", 854, 480)
                             .opengl()
@@ -220,6 +227,7 @@ fn main() {
         focused: false,
         renderer: renderer,
         screen_sys: screen_sys,
+        sound_manager: sound::Manager::new(resource_manager.clone()),
         resource_manager: resource_manager.clone(),
         console: con,
         vars: vars,
@@ -243,6 +251,7 @@ fn main() {
             res.tick(&mut resui, &mut ui_container, delta);
             res.version()
         };
+        game.sound_manager.tick(version);
 
         let vsync_changed = *game.vars.get(settings::R_VSYNC);
         if vsync != vsync_changed {
@@ -252,7 +261,7 @@ fn main() {
         let fps_cap = *game.vars.get(settings::R_MAX_FPS);
 
         game.tick(delta);
-        game.server.tick(&mut game.renderer, delta);
+        game.server.tick(&mut game.renderer, &mut game.sound_manager, delta);
 
         game.renderer.update_camera(width, height);
         game.server.world.compute_render_list(&mut game.renderer);
