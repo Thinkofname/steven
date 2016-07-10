@@ -794,7 +794,7 @@ state_packets!(
             }
             /// SoundEffect plays the named sound at the target location.
             packet SoundEffect {
-                field name: VarInt =,
+                field id: VarInt =,
                 field category: VarInt =,
                 field x: i32 =,
                 field y: i32 =,

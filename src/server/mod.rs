@@ -32,6 +32,7 @@ use collision::Aabb;
 use types::Gamemode;
 use shared::{Axis, Position};
 use format;
+use sound;
 
 mod sun;
 pub mod plugin_messages;
@@ -313,7 +314,7 @@ impl Server {
         self.conn.is_some()
     }
 
-    pub fn tick(&mut self, renderer: &mut render::Renderer, delta: f64) {
+    pub fn tick(&mut self, renderer: &mut render::Renderer, sound_manager: &mut sound::Manager, delta: f64) {
         let version = self.resources.read().unwrap().version();
         if version != self.version {
             self.version = version;
@@ -332,7 +333,7 @@ impl Server {
             renderer.camera.yaw = rotation.yaw;
             renderer.camera.pitch = rotation.pitch;
         }
-        self.entity_tick(renderer, delta);
+        self.entity_tick(renderer, sound_manager, delta);
 
         self.tick_timer += delta;
         while self.tick_timer >= 3.0 && self.is_connected() {
@@ -359,7 +360,7 @@ impl Server {
         }
     }
 
-    fn entity_tick(&mut self, renderer: &mut render::Renderer, delta: f64) {
+    fn entity_tick(&mut self, renderer: &mut render::Renderer, sound_manager: &mut sound::Manager, delta: f64) {
         let world_entity = self.entities.get_world();
         // Update the game's state for entities to read
         self.entities.get_component_mut(world_entity, self.game_info)
@@ -369,6 +370,15 @@ impl Server {
         if let Some(rx) = self.read_queue.take() {
             while let Ok(pck) = rx.try_recv() {
                 match pck {
+                    Ok(packet::Packet::SoundEffect(pck)) => {
+                        sound_manager.play_sound_by_id(pck.id.0, pck.volume as f64, pck.pitch as f64 / 63.0);
+                    },
+                    Ok(packet::Packet::NamedSoundEffect(pck)) => {
+                        sound_manager.play_sound(&pck.name, pck.volume as f64, pck.pitch as f64 / 63.0);
+                    },
+                    Ok(packet::Packet::Effect(pck)) => {
+                        self.on_effect(sound_manager, pck);
+                    },
                     Ok(pck) => handle_packet!{
                         self pck {
                             JoinGame => on_game_join,
@@ -595,6 +605,16 @@ impl Server {
                 // TODO: Temp
                 self.entities.get_component_mut(player, self.player_movement).unwrap().flying = gamemode.can_fly();
             }
+        }
+    }
+
+    fn on_effect(&mut self, sound_manager: &mut sound::Manager, effect: packet::play::clientbound::Effect) {
+        match effect.effect_id {
+            1005 => sound_manager.play_sound("minecraft:block.iron_door.open", 1.0, 1.0),
+            1006 => sound_manager.play_sound("minecraft:block.wooden_door.open", 1.0, 1.0),
+            1011 => sound_manager.play_sound("minecraft:block.iron_door.close", 1.0, 1.0),
+            1012 => sound_manager.play_sound("minecraft:block.wooden_door.close", 1.0, 1.0),
+            _ => {},
         }
     }
 
