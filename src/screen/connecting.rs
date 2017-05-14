@@ -56,7 +56,7 @@ impl super::Screen for Connecting {
 
         // Disclaimer
         let disclaimer = ui::TextBuilder::new()
-            .text("Not affiliated with Mojang/Minecraft")
+            .text("test")
             .position(5.0, 5.0)
             .colour((255, 200, 200, 255))
             .alignment(ui::VAttach::Bottom, ui::HAttach::Right)
