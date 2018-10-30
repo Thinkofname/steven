@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use openssl::crypto::hash;
+use sha1::{self, Digest};
 use serde_json;
-use serde_json::builder::ObjectBuilder;
-use hyper;
+use reqwest;
 
 #[derive(Clone, Debug)]
 pub struct Profile {
@@ -31,82 +30,81 @@ const VALIDATE_URL: &'static str = "https://authserver.mojang.com/validate";
 
 impl Profile {
     pub fn login(username: &str, password: &str, token: &str) -> Result<Profile, super::Error> {
-        let req_msg = ObjectBuilder::new()
-                           .insert("username", username)
-                           .insert("password", password)
-                           .insert("clientToken", token)
-                           .insert_object("agent", |b| b
-                                .insert("name", "Minecraft")
-                                .insert("version", 1)
-                            )
-                           .unwrap();
+        let req_msg = json!({
+            "username": username,
+            "password": password,
+            "clientToken": token,
+            "agent": {
+                "name": "Minecraft",
+                "version": 1
+            }});
         let req = try!(serde_json::to_string(&req_msg));
 
-        let client = hyper::Client::new();
-        let res = try!(client.post(LOGIN_URL)
-                        .body(&req)
-                        .header(hyper::header::ContentType("application/json".parse().unwrap()))
-                        .send());
+        let client = reqwest::Client::new();
+        let res = client.post(LOGIN_URL)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(req)
+            .send()?;
 
         let ret: serde_json::Value = try!(serde_json::from_reader(res));
-        if let Some(error) = ret.find("error").and_then(|v| v.as_string()) {
+        if let Some(error) = ret.get("error").and_then(|v| v.as_str()) {
             return Err(super::Error::Err(format!(
                 "{}: {}",
                 error,
-                ret.find("errorMessage").and_then(|v| v.as_string()).unwrap())
+                ret.get("errorMessage").and_then(|v| v.as_str()).unwrap())
             ));
         }
         Ok(Profile {
-            username: ret.lookup("selectedProfile.name").and_then(|v| v.as_string()).unwrap().to_owned(),
-            id: ret.lookup("selectedProfile.id").and_then(|v| v.as_string()).unwrap().to_owned(),
-            access_token: ret.find("accessToken").and_then(|v| v.as_string()).unwrap().to_owned(),
+            username: ret.pointer("/selectedProfile/name").and_then(|v| v.as_str()).unwrap().to_owned(),
+            id: ret.pointer("/selectedProfile/id").and_then(|v| v.as_str()).unwrap().to_owned(),
+            access_token: ret.get("accessToken").and_then(|v| v.as_str()).unwrap().to_owned(),
         })
     }
 
     pub fn refresh(self, token: &str) -> Result<Profile, super::Error> {
-        let req_msg = ObjectBuilder::new()
-                           .insert("accessToken", self.access_token.clone())
-                           .insert("clientToken", token)
-                           .unwrap();
+        let req_msg = json!({
+            "accessToken": self.access_token.clone(),
+            "clientToken": token
+            });
         let req = try!(serde_json::to_string(&req_msg));
 
-        let client = hyper::Client::new();
-        let res = try!(client.post(VALIDATE_URL)
-                        .body(&req)
-                        .header(hyper::header::ContentType("application/json".parse().unwrap()))
-                        .send());
+        let client = reqwest::Client::new();
+        let res = client.post(VALIDATE_URL)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(req)
+            .send()?;
 
-        if res.status != hyper::status::StatusCode::NoContent {
+        if res.status() != reqwest::StatusCode::NO_CONTENT {
+            let req = try!(serde_json::to_string(&req_msg)); // TODO: fix parsing twice to avoid move
             // Refresh needed
-            let res = try!(client.post(REFRESH_URL)
-                            .body(&req)
-                            .header(hyper::header::ContentType("application/json".parse().unwrap()))
-                            .send());
+            let res = client.post(REFRESH_URL)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(req)
+                .send()?;
 
             let ret: serde_json::Value = try!(serde_json::from_reader(res));
-            if let Some(error) = ret.find("error").and_then(|v| v.as_string()) {
+            if let Some(error) = ret.get("error").and_then(|v| v.as_str()) {
                 return Err(super::Error::Err(format!(
                     "{}: {}",
                     error,
-                    ret.find("errorMessage").and_then(|v| v.as_string()).unwrap())
+                    ret.get("errorMessage").and_then(|v| v.as_str()).unwrap())
                 ));
             }
             return Ok(Profile {
-                username: ret.lookup("selectedProfile.name").and_then(|v| v.as_string()).unwrap().to_owned(),
-                id: ret.lookup("selectedProfile.id").and_then(|v| v.as_string()).unwrap().to_owned(),
-                access_token: ret.find("accessToken").and_then(|v| v.as_string()).unwrap().to_owned(),
+                username: ret.pointer("/selectedProfile/name").and_then(|v| v.as_str()).unwrap().to_owned(),
+                id: ret.pointer("/selectedProfile/id").and_then(|v| v.as_str()).unwrap().to_owned(),
+                access_token: ret.get("accessToken").and_then(|v| v.as_str()).unwrap().to_owned(),
             });
         }
         Ok(self)
     }
 
     pub fn join_server(&self, server_id: &str, shared_key: &[u8], public_key: &[u8]) -> Result<(), super::Error> {
-        use std::io::Write;
-        let mut sha1 = hash::Hasher::new(hash::Type::SHA1);
-        sha1.write_all(server_id.as_bytes()).unwrap();
-        sha1.write_all(shared_key).unwrap();
-        sha1.write_all(public_key).unwrap();
-        let mut hash = sha1.finish();
+        let mut hasher = sha1::Sha1::new();
+        hasher.input(server_id.as_bytes());
+        hasher.input(shared_key);
+        hasher.input(public_key);
+        let mut hash = hasher.result();
 
         // Mojang uses a hex method which allows for
         // negatives so we have to account for that.
@@ -122,20 +120,20 @@ impl Profile {
             hash_val.to_owned()
         };
 
-        let join_msg = ObjectBuilder::new()
-                           .insert("accessToken", &self.access_token)
-                           .insert("selectedProfile", &self.id)
-                           .insert("serverId", hash_str)
-                           .unwrap();
+        let join_msg = json!({
+            "accessToken": &self.access_token,
+            "selectedProfile": &self.id,
+            "serverId": hash_str
+        });
         let join = serde_json::to_string(&join_msg).unwrap();
 
-        let client = hyper::Client::new();
-        let res = try!(client.post(JOIN_URL)
-                        .body(&join)
-                        .header(hyper::header::ContentType("application/json".parse().unwrap()))
-                        .send());
+        let client = reqwest::Client::new();
+        let res = client.post(JOIN_URL)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(join)
+            .send()?;
 
-        if res.status == hyper::status::StatusCode::NoContent {
+        if res.status() == reqwest::StatusCode::NO_CONTENT {
             Ok(())
         } else {
             Err(super::Error::Err("Failed to auth with server".to_owned()))
@@ -147,7 +145,7 @@ impl Profile {
     }
 }
 
-fn twos_compliment(data: &mut Vec<u8>) {
+fn twos_compliment(data: &mut [u8]) {
     let mut carry = true;
     for i in (0..data.len()).rev() {
         data[i] = !data[i];

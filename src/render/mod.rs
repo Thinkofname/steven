@@ -26,10 +26,10 @@ use std::io::Write;
 use resources;
 use gl;
 use image;
-use image::GenericImage;
+use image::{GenericImage, GenericImageView};
 use byteorder::{WriteBytesExt, NativeEndian};
 use serde_json;
-use cgmath::{self, Vector, Point, SquareMatrix};
+use cgmath::prelude::*;
 use world;
 use collision;
 
@@ -42,7 +42,7 @@ use std::sync::mpsc;
 const ATLAS_SIZE: usize = 1024;
 
 // TEMP
-const NUM_SAMPLES: i32 = 1;
+const NUM_SAMPLES: i32 = 2;
 
 pub struct Camera {
     pub pos: cgmath::Point3<f64>,
@@ -257,7 +257,7 @@ impl Renderer {
 
             self.perspective_matrix = cgmath::Matrix4::from(
                 cgmath::PerspectiveFov {
-                    fovy: cgmath::Rad::from(cgmath::Deg{s: 90f32}),
+                    fovy: cgmath::Rad::from(cgmath::Deg(90f32)),
                     aspect: (width as f32 / height as f32),
                     near: 0.1f32,
                     far: 500.0f32,
@@ -365,6 +365,7 @@ impl Renderer {
             }
         }
 
+        gl::check_framebuffer_status();
         gl::unbind_framebuffer();
         gl::disable(gl::DEPTH_TEST);
         gl::clear(gl::ClearFlags::Color);
@@ -377,6 +378,8 @@ impl Renderer {
         gl::disable(gl::MULTISAMPLE);
 
         self.ui.tick(width, height);
+
+        gl::check_gl_error();
 
         self.frame_id = self.frame_id.wrapping_add(1);
     }
@@ -704,8 +707,8 @@ impl TransInfo {
         chunk_shader.program.use_program();
         gl::bind_frag_data_location(&chunk_shader.program, 0, "accum");
         gl::bind_frag_data_location(&chunk_shader.program, 1, "revealage");
+        gl::check_framebuffer_status();
         gl::draw_buffers(&[gl::COLOR_ATTACHMENT_0, gl::COLOR_ATTACHMENT_1]);
-
 
         let main = gl::Framebuffer::new();
         main.bind();
@@ -719,6 +722,7 @@ impl TransInfo {
         fb_depth.bind(gl::TEXTURE_2D_MULTISAMPLE);
         fb_depth.image_2d_sample(gl::TEXTURE_2D_MULTISAMPLE, NUM_SAMPLES, width, height, gl::DEPTH_COMPONENT24, false);
         main.texture_2d(gl::DEPTH_ATTACHMENT, gl::TEXTURE_2D_MULTISAMPLE, &fb_depth, 0);
+        gl::check_framebuffer_status();
 
         gl::unbind_framebuffer();
 
@@ -833,8 +837,8 @@ impl TextureManager {
     }
 
     fn process_skins(recv: mpsc::Receiver<String>, reply: mpsc::Sender<(String, Option<image::DynamicImage>)>) {
-        use hyper;
-        let client = hyper::Client::new();
+        use reqwest;
+        let client = reqwest::Client::new();
         loop {
             let hash = match recv.recv() {
                 Ok(val) => val,
@@ -852,7 +856,7 @@ impl TextureManager {
         }
     }
 
-    fn obtain_skin(client: &::hyper::Client, hash: &str) -> Result<image::DynamicImage, ::std::io::Error> {
+    fn obtain_skin(client: &::reqwest::Client, hash: &str) -> Result<image::DynamicImage, ::std::io::Error> {
         use std::io::Read;
         use std::fs;
         use std::path::Path;
@@ -867,14 +871,22 @@ impl TextureManager {
             try!(file.read_to_end(&mut buf));
         } else {
             // Need to download it
-            let url = format!("http://textures.minecraft.net/texture/{}", hash);
-            let mut res = match client.get(&url).send() {
+            let url = &format!("http://textures.minecraft.net/texture/{}", hash);
+            let mut res = match client.get(url).send() {
                 Ok(val) => val,
                 Err(err) => {
                     return Err(Error::new(ErrorKind::ConnectionAborted, err));
                 }
             };
-            try!(res.read_to_end(&mut buf));
+            let mut buf = vec![];
+            match res.read_to_end(&mut buf) {
+                Ok(_) => {},
+                Err(err) => {
+                    // TODO: different error for failure to read?
+                    return Err(Error::new(ErrorKind::InvalidData, err));
+                }
+            }
+
             // Save to cache
             let mut file = try!(fs::File::create(cache_path));
             try!(file.write_all(&buf));
@@ -1056,12 +1068,12 @@ impl TextureManager {
         let res = self.resources.clone();
         if let Some(val) = res.read().unwrap().open(plugin, &path) {
             let meta: serde_json::Value = serde_json::from_reader(val).unwrap();
-            let animation = meta.find("animation").unwrap();
-            let frame_time = animation.find("frametime").and_then(|v| v.as_i64()).unwrap_or(1);
-            let interpolate = animation.find("interpolate")
-                                       .and_then(|v| v.as_boolean())
+            let animation = meta.get("animation").unwrap();
+            let frame_time = animation.get("frametime").and_then(|v| v.as_i64()).unwrap_or(1);
+            let interpolate = animation.get("interpolate")
+                                       .and_then(|v| v.as_bool())
                                        .unwrap_or(false);
-            let frames = if let Some(frames) = animation.find("frames")
+            let frames = if let Some(frames) = animation.get("frames")
                                                         .and_then(|v| v.as_array()) {
                 let mut out = Vec::with_capacity(frames.len());
                 for frame in frames {
@@ -1072,8 +1084,8 @@ impl TextureManager {
                         })
                     } else {
                         out.push(AnimationFrame{
-                            index: frame.find("index").unwrap().as_i64().unwrap() as usize,
-                            time: frame_time * frame.find("frameTime").unwrap().as_i64().unwrap(),
+                            index: frame.get("index").unwrap().as_i64().unwrap() as usize,
+                            time: frame_time * frame.get("frameTime").unwrap().as_i64().unwrap(),
                         })
                     }
                 }

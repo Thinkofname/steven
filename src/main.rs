@@ -18,14 +18,17 @@
 extern crate sdl2;
 extern crate zip;
 extern crate image;
-extern crate time;
+use std::time::{Instant, Duration};
 extern crate byteorder;
+#[macro_use]
 extern crate serde_json;
 extern crate openssl;
-extern crate hyper;
+extern crate sha1;
+extern crate reqwest;
 extern crate flate2;
 extern crate rand;
-extern crate rustc_serialize;
+extern crate hex;
+extern crate base64;
 extern crate cgmath;
 #[macro_use]
 extern crate log;
@@ -176,10 +179,8 @@ fn main() {
 
     let proxy = console::ConsoleProxy::new(con.clone());
 
-    log::set_logger(|max_log_level| {
-        max_log_level.set(log::LogLevelFilter::Trace);
-        Box::new(proxy)
-    }).unwrap();
+    log::set_boxed_logger(Box::new(proxy)).unwrap();
+    log::set_max_level(log::LevelFilter::Trace);
 
     info!("Starting steven");
 
@@ -193,6 +194,7 @@ fn main() {
                             .resizable()
                             .build()
                             .expect("Could not create sdl window.");
+    sdl2::hint::set_with_priority("SDL_MOUSE_RELATIVE_MODE_WARP", "1", &sdl2::hint::Hint::Override);
     let gl_attr = sdl_video.gl_attr();
     gl_attr.set_stencil_size(0);
     gl_attr.set_depth_size(24);
@@ -211,8 +213,8 @@ fn main() {
     let renderer = render::Renderer::new(resource_manager.clone());
     let mut ui_container = ui::Container::new();
 
-    let mut last_frame = time::now();
-    let frame_time = (time::Duration::seconds(1).num_nanoseconds().unwrap() as f64) / 60.0;
+    let mut last_frame = Instant::now();
+    let frame_time = 1e9f64 / 60.0;
 
     let mut screen_sys = screen::ScreenSystem::new();
     screen_sys.add_screen(Box::new(screen::Login::new(vars.clone())));
@@ -236,10 +238,10 @@ fn main() {
     let mut events = game.sdl.event_pump().unwrap();
     while !game.should_close {
 
-        let now = time::now();
-        let diff = now - last_frame;
+        let now = Instant::now();
+        let diff = now.duration_since(last_frame);
         last_frame = now;
-        let delta = (diff.num_nanoseconds().unwrap() as f64) / frame_time;
+        let delta = (diff.subsec_nanos() as f64) / frame_time;
         let (width, height) = window.drawable_size();
 
         let version = {
@@ -272,10 +274,10 @@ fn main() {
 
 
         if fps_cap > 0 && !vsync {
-            let frame_time = time::now() - now;
-            let sleep_interval = time::Duration::milliseconds(1000 / fps_cap);
+            let frame_time = now.elapsed();
+            let sleep_interval = Duration::from_millis(1000 / fps_cap as u64);
             if frame_time < sleep_interval {
-                thread::sleep((sleep_interval - frame_time).to_std().unwrap());
+                thread::sleep(sleep_interval - frame_time);
             }
         }
         window.gl_swap_window();

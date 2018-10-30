@@ -370,8 +370,18 @@ impl Texture {
                     format: TextureFormat,
                     fixed: bool) {
         unsafe {
+            let result: &mut [i32] = &mut [0; 1];
+            gl::GetIntegerv(gl::MAX_SAMPLES, &mut result[0]);
+            let use_samples =
+                if samples > result[0] {
+                    println!("glTexImage2DMultisample: requested {} samples but GL_MAX_SAMPLES is {}", samples, result[0]);
+                    result[0]
+                } else {
+                    samples
+                };
+
             gl::TexImage2DMultisample(target,
-                           samples,
+                           use_samples,
                            format,
                            width as i32,
                            height as i32,
@@ -818,6 +828,45 @@ pub const COLOR_ATTACHMENT_2: Attachment = gl::COLOR_ATTACHMENT2;
 pub const DEPTH_ATTACHMENT: Attachment = gl::DEPTH_ATTACHMENT;
 
 pub struct Framebuffer(u32);
+
+pub fn check_framebuffer_status() {
+    unsafe {
+        let status = gl::CheckFramebufferStatus(gl::FRAMEBUFFER);
+        let s =
+        match status {
+            gl::FRAMEBUFFER_UNDEFINED => "GL_FRAMEBUFFER_UNDEFINED",
+            gl::FRAMEBUFFER_INCOMPLETE_ATTACHMENT => "GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT",
+            gl::FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT => "GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT",
+            gl::FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER => "GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER",
+            gl::FRAMEBUFFER_INCOMPLETE_READ_BUFFER => "GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER",
+            gl::FRAMEBUFFER_UNSUPPORTED => "GL_FRAMEBUFFER_UNSUPPORTED",
+            gl::FRAMEBUFFER_INCOMPLETE_MULTISAMPLE => "GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE",
+            gl::FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS => "GL_FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS",
+
+            gl::FRAMEBUFFER_COMPLETE => "GL_FRAMEBUFFER_COMPLETE",
+            //gl::FRAMEBUFFER_INCOMPLETE_DIMENSIONS => "GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS",
+            _ => "unknown"
+        };
+
+        if status != gl::FRAMEBUFFER_COMPLETE {
+            println!("glBindFramebuffer failed, glCheckFrameBufferStatus(GL_FRAMEBUFFER) = {} {}", status, s);
+            panic!("glBindFramebuffer failed, glCheckFrameBufferStatus(GL_FRAMEBUFFER) = {} {}", status, s);
+        }
+    }
+}
+
+pub fn check_gl_error() {
+    unsafe {
+        loop {
+            let err = gl::GetError();
+            if err == gl::NO_ERROR {
+                break
+            }
+
+            println!("glGetError = {}", err);
+        }
+    }
+}
 
 impl Framebuffer {
     pub fn new() -> Framebuffer {

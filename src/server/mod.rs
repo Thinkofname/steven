@@ -27,7 +27,7 @@ use render;
 use settings::Stevenkey;
 use ecs;
 use entity;
-use cgmath::{self, Point};
+use cgmath::prelude::*;
 use types::Gamemode;
 use shared::{Axis, Position};
 use format;
@@ -37,7 +37,6 @@ pub mod plugin_messages;
 pub mod target;
 
 pub struct Server {
-    username: String,
     uuid: protocol::UUID,
     conn: Option<protocol::Conn>,
     read_queue: Option<mpsc::Receiver<Result<packet::Packet, protocol::Error>>>,
@@ -103,8 +102,8 @@ macro_rules! handle_packet {
 impl Server {
 
     pub fn connect(resources: Arc<RwLock<resources::Manager>>, profile: mojang::Profile, address: &str) -> Result<Server, protocol::Error> {
-        use openssl::crypto::pkey;
-        use openssl::crypto::rand::rand_bytes;
+        use openssl::rand::rand_bytes;
+        use openssl::rsa::{Rsa, Padding};
         let mut conn = try!(protocol::Conn::new(address));
 
         let host = conn.host.clone();
@@ -138,19 +137,21 @@ impl Server {
                     read.state = protocol::State::Play;
                     write.state = protocol::State::Play;
                     let rx = Self::spawn_reader(read);
-                    return Ok(Server::new(val.username, protocol::UUID::from_str(&val.uuid), resources, Some(write), Some(rx)));
+                    return Ok(Server::new(protocol::UUID::from_str(&val.uuid), resources, Some(write), Some(rx)));
                 }
                 protocol::packet::Packet::LoginDisconnect(val) => return Err(protocol::Error::Disconnect(val.reason)),
                 val => return Err(protocol::Error::Err(format!("Wrong packet: {:?}", val))),
             };
         }
 
-        let mut key = pkey::PKey::new();
-        key.load_pub(&packet.public_key.data);
-        let shared = rand_bytes(16);
+        let rsa = Rsa::public_key_from_der(&packet.public_key.data).unwrap();
+        let mut shared = [0; 16];
+        rand_bytes(&mut shared).unwrap();
 
-        let shared_e = key.public_encrypt_with_padding(&shared, pkey::EncryptionPadding::PKCS1v15);
-        let token_e = key.public_encrypt_with_padding(&packet.verify_token.data, pkey::EncryptionPadding::PKCS1v15);
+        let mut shared_e = vec![0; rsa.size() as usize];
+        let mut token_e = vec![0; rsa.size() as usize];
+        rsa.public_encrypt(&shared, &mut shared_e, Padding::PKCS1)?;
+        rsa.public_encrypt(&packet.verify_token.data, &mut token_e, Padding::PKCS1)?;
 
         try!(profile.join_server(&packet.server_id, &shared, &packet.public_key.data));
 
@@ -165,7 +166,6 @@ impl Server {
         read.enable_encyption(&shared, true);
         write.enable_encyption(&shared, false);
 
-        let username;
         let uuid;
         loop {
            match try!(read.read_packet()) {
@@ -175,7 +175,6 @@ impl Server {
                }
                protocol::packet::Packet::LoginSuccess(val) => {
                    debug!("Login: {} {}", val.username, val.uuid);
-                   username = val.username;
                    uuid = val.uuid;
                    read.state = protocol::State::Play;
                    write.state = protocol::State::Play;
@@ -188,7 +187,7 @@ impl Server {
 
         let rx = Self::spawn_reader(read);
 
-        Ok(Server::new(username, protocol::UUID::from_str(&uuid), resources, Some(write), Some(rx)))
+        Ok(Server::new(protocol::UUID::from_str(&uuid), resources, Some(write), Some(rx)))
     }
 
     fn spawn_reader(mut read: protocol::Conn) -> mpsc::Receiver<Result<packet::Packet, protocol::Error>> {
@@ -209,7 +208,7 @@ impl Server {
     }
 
     pub fn dummy_server(resources: Arc<RwLock<resources::Manager>>) -> Server {
-        let mut server = Server::new("dummy".to_owned(), protocol::UUID::default(), resources, None, None);
+        let mut server = Server::new(protocol::UUID::default(), resources, None, None);
         let mut rng = rand::thread_rng();
         for x in -7*16 .. 7*16 {
             for z in -7*16 .. 7*16 {
@@ -219,7 +218,7 @@ impl Server {
                 }
                 server.world.set_block(Position::new(x, h, z), block::Grass{ snowy: false });
 
-                if x*x + z*z > 16*16 && rng.gen_weighted_bool(80) {
+                if x*x + z*z > 16*16 && rng.gen_bool(1.0 / 80.0) {
                     for i in 0 .. 5 {
                         server.world.set_block(Position::new(x, h + 1 + i, z), block::Log{ axis: Axis::Y, variant: block::TreeVariant::Oak });
                     }
@@ -245,7 +244,7 @@ impl Server {
     }
 
     fn new(
-        username: String, uuid: protocol::UUID,
+        uuid: protocol::UUID,
         resources: Arc<RwLock<resources::Manager>>,
         conn: Option<protocol::Conn>, read_queue: Option<mpsc::Receiver<Result<packet::Packet, protocol::Error>>>
     ) -> Server {
@@ -258,7 +257,6 @@ impl Server {
 
         let version = resources.read().unwrap().version();
         Server {
-            username: username,
             uuid: uuid,
             conn: conn,
             read_queue: read_queue,
@@ -327,7 +325,7 @@ impl Server {
         if let Some(player) = self.player {
             let position = self.entities.get_component(player, self.position).unwrap();
             let rotation = self.entities.get_component(player, self.rotation).unwrap();
-            renderer.camera.pos = cgmath::Point::from_vec(position.position + cgmath::Vector3::new(0.0, 1.62, 0.0));
+            renderer.camera.pos = cgmath::Point3::from_vec(position.position + cgmath::Vector3::new(0.0, 1.62, 0.0));
             renderer.camera.yaw = rotation.yaw;
             renderer.camera.pitch = rotation.pitch;
         }
@@ -348,7 +346,7 @@ impl Server {
         self.world.tick(&mut self.entities);
 
         if self.player.is_some() {
-            if let Some((pos, bl, _, _)) = target::trace_ray(&self.world, 4.0, renderer.camera.pos.to_vec(), renderer.view_vector.cast(), target::test_block) {
+            if let Some((pos, bl, _, _)) = target::trace_ray(&self.world, 4.0, renderer.camera.pos.to_vec(), renderer.view_vector.cast().unwrap(), target::test_block) {
                 self.target_info.update(renderer, pos, bl);
             } else {
                 self.target_info.clear(renderer);
@@ -509,7 +507,7 @@ impl Server {
     pub fn on_right_click(&mut self, renderer: &mut render::Renderer) {
         use shared::Direction;
         if self.player.is_some() {
-            if let Some((pos, _, face, at)) = target::trace_ray(&self.world, 4.0, renderer.camera.pos.to_vec(), renderer.view_vector.cast(), target::test_block) {
+            if let Some((pos, _, face, at)) = target::trace_ray(&self.world, 4.0, renderer.camera.pos.to_vec(), renderer.view_vector.cast().unwrap(), target::test_block) {
                 self.write_packet(packet::play::serverbound::PlayerBlockPlacement {
                     location: pos,
                     face: protocol::VarInt(match face {
@@ -722,10 +720,10 @@ impl Server {
             Some(nbt) => {
                 if block_update.action == 9 {
                     use format;
-                    let line1 = format::Component::from_string(nbt.1.get("Text1").unwrap().as_string().unwrap());
-                    let line2 = format::Component::from_string(nbt.1.get("Text2").unwrap().as_string().unwrap());
-                    let line3 = format::Component::from_string(nbt.1.get("Text3").unwrap().as_string().unwrap());
-                    let line4 = format::Component::from_string(nbt.1.get("Text4").unwrap().as_string().unwrap());
+                    let line1 = format::Component::from_string(nbt.1.get("Text1").unwrap().as_str().unwrap());
+                    let line2 = format::Component::from_string(nbt.1.get("Text2").unwrap().as_str().unwrap());
+                    let line3 = format::Component::from_string(nbt.1.get("Text3").unwrap().as_str().unwrap());
+                    let line4 = format::Component::from_string(nbt.1.get("Text4").unwrap().as_str().unwrap());
                     self.world.add_block_entity_action(world::BlockEntityAction::UpdateSignText(
                         block_update.location,
                         line1,
@@ -740,7 +738,7 @@ impl Server {
 
     fn on_player_info(&mut self, player_info: packet::play::clientbound::PlayerInfo) {
         use protocol::packet::PlayerDetail::*;
-        use rustc_serialize::base64::FromBase64;
+        use base64;
         use serde_json;
         for detail in player_info.inner.players {
             match detail {
@@ -769,7 +767,8 @@ impl Server {
                         // authlib. We could download authlib on startup and extract
                         // the key but this seems like overkill compared to just
                         // whitelisting Mojang's texture servers instead.
-                        let skin_blob = match prop.value.from_base64() {
+                        let skin_blob_result = &base64::decode_config(&prop.value, base64::MIME);
+                        let skin_blob = match skin_blob_result {
                             Ok(val) => val,
                             Err(err) => {
                                 error!("Failed to decode skin blob, {:?}", err);
@@ -783,7 +782,7 @@ impl Server {
                                 continue;
                             },
                         };
-                        if let Some(skin_url) = skin_blob.lookup("textures.SKIN.url").and_then(|v| v.as_string()) {
+                        if let Some(skin_url) = skin_blob.pointer("/textures/SKIN/url").and_then(|v| v.as_str()) {
                             info.skin_url = Some(skin_url.to_owned());
                         }
                     }
@@ -833,7 +832,7 @@ impl Server {
                 let x = block_entity.1.get("x").unwrap().as_int().unwrap();
                 let y = block_entity.1.get("y").unwrap().as_int().unwrap();
                 let z = block_entity.1.get("z").unwrap().as_int().unwrap();
-                let tile_id = block_entity.1.get("id").unwrap().as_string().unwrap();
+                let tile_id = block_entity.1.get("id").unwrap().as_str().unwrap();
                 let action;
                 match tile_id {
                     // Fake a sign update

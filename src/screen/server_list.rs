@@ -25,9 +25,9 @@ use format::{Component, TextComponent};
 use protocol;
 
 use serde_json;
-use time;
+use std::time::{Duration};
 use image;
-use rustc_serialize::base64::FromBase64;
+use base64;
 use rand;
 use rand::Rng;
 
@@ -69,7 +69,7 @@ struct Server {
 
 struct PingInfo {
     motd: format::Component,
-    ping: time::Duration,
+    ping: Duration,
     exists: bool,
     online: i32,
     max: i32,
@@ -118,12 +118,12 @@ impl ServerList {
             Err(_) => return,
         };
         let servers_info: serde_json::Value = serde_json::from_reader(file).unwrap();
-        let servers = servers_info.find("servers").unwrap().as_array().unwrap();
+        let servers = servers_info.get("servers").unwrap().as_array().unwrap();
         let mut offset = 0.0;
 
         for (index, svr) in servers.iter().enumerate() {
-            let name = svr.find("name").unwrap().as_string().unwrap().to_owned();
-            let address = svr.find("address").unwrap().as_string().unwrap().to_owned();
+            let name = svr.get("name").unwrap().as_str().unwrap().to_owned();
+            let address = svr.get("address").unwrap().as_str().unwrap().to_owned();
 
             // Everything is attached to this
             let back = ui::ImageBuilder::new()
@@ -264,9 +264,8 @@ impl ServerList {
                         let mut desc = res.0.description;
                         format::convert_legacy(&mut desc);
                         let favicon = if let Some(icon) = res.0.favicon {
-                            let data = icon["data:image/png;base64,".len()..]
-                                           .from_base64()
-                                           .unwrap();
+                            let data_base64 = &icon["data:image/png;base64,".len()..];
+                            let data = base64::decode_config(data_base64, base64::MIME).unwrap();
                             Some(image::load_from_memory(&data).unwrap())
                         } else {
                             None
@@ -288,7 +287,7 @@ impl ServerList {
                         msg.modifier.color = Some(format::Color::Red);
                         let _ = send.send(PingInfo {
                             motd: Component::Text(msg),
-                            ping: time::Duration::seconds(99999),
+                            ping: Duration::new(99999, 0),
                             exists: false,
                             online: 0,
                             max: 0,
@@ -465,7 +464,9 @@ impl super::Screen for ServerList {
                         s.done_ping = true;
                         s.motd.borrow_mut().set_text(res.motd);
                         // Selects the icon for the given ping range
-                        let y = match res.ping.num_milliseconds() {
+                        // TODO: switch to as_millis() experimental duration_as_u128 #50202 once available?
+                        let ping_ms = (res.ping.subsec_nanos() as f64)/1000000.0 + (res.ping.as_secs() as f64)*1000.0;
+                        let y = match ping_ms.round() as u64 {
                             _x @ 0 ... 75 => 16.0 / 256.0,
                             _x @ 76 ... 150 => 24.0 / 256.0,
                             _x @ 151 ... 225 => 32.0 / 256.0,
@@ -495,10 +496,10 @@ impl super::Screen for ServerList {
                             s.version.borrow_mut().set_text(msg);
                         }
                         if let Some(favicon) = res.favicon {
-                            let name: String = rand::thread_rng()
-                                                   .gen_ascii_chars()
-                                                   .take(30)
-                                                   .collect();
+                            let name: String = std::iter::repeat(()).map(|()| rand::thread_rng()
+                                               .sample(&rand::distributions::Alphanumeric))
+                                               .take(30)
+                                               .collect();
                             let tex = renderer.get_textures_ref();
                             s.icon_texture = Some(name.clone());
                             let icon_tex = tex.write()
